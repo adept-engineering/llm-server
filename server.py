@@ -87,7 +87,7 @@ class ModelManager:
             # Check memory before generation
             if not self.check_memory(2.0):
                 self.cleanup_if_needed()
-                
+            
             # Get tokenizer from the pipeline
             tokenizer = self.pipe.tokenizer
             
@@ -98,23 +98,30 @@ class ModelManager:
             input_ids = tokenizer.encode(formatted_prompt)
             input_token_count = len(input_ids)
             
-            # Calculate available tokens within model's context window
-            # Most models have a context window between 2048-4096 tokens
-            # For Gemma, let's assume 8192 (but check the specific model's limits)
-            model_max_tokens = 8192  # Adjust based on your specific Gemma model version
-            available_tokens = model_max_tokens - input_token_count
+            # Gemma-3-1b-it has a 32K token input context and 8192 token output context
+            input_context_limit = 32768  # 32K for 1B model
+            output_context_limit = 8192  # 8K for all Gemma models
             
-            # Ensure we don't exceed user request or available context
-            safe_max_tokens = max(1, min(max_tokens, available_tokens, 2048))
+            # Make sure we don't exceed input context
+            if input_token_count > input_context_limit:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Input too long: {input_token_count} tokens exceeds the model's {input_context_limit} token limit"
+                )
             
-            print(f"Input tokens: {input_token_count}, Available: {available_tokens}, Generating: {safe_max_tokens}")
+            # Ensure we don't exceed user request or output context limit
+            # Also apply a reasonable default limit to prevent OOM errors
+            gpu_memory_limit = 2048 if self.check_memory(4.0) else 1024  # Adaptive based on available memory
+            safe_max_tokens = max(1, min(max_tokens, output_context_limit, gpu_memory_limit))
+            
+            print(f"Input tokens: {input_token_count}, Generating up to: {safe_max_tokens} tokens")
             
             # Perform generation with memory-efficient settings
             output = self.pipe(
                 messages, 
                 max_new_tokens=safe_max_tokens,
                 do_sample=True,
-                temperature=0.7,  # Lower temperature for more deterministic outputs
+                temperature=0.7,
                 num_return_sequences=1,
                 clean_up_tokenization_spaces=True,
                 repetition_penalty=1.1
