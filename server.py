@@ -35,8 +35,7 @@ class ModelManager:
             "text-generation",
             model="google/gemma-3-1b-it",
             device="cuda" if torch.cuda.is_available() else "cpu",
-            torch_dtype=torch.bfloat16,
-            model_kwargs={'low_cpu_mem_usage': True}
+            torch_dtype=torch.bfloat
         )
         self.last_used = time.time()
         self.processing = False
@@ -78,8 +77,7 @@ class ModelManager:
                     "text-generation",
                     model="google/gemma-3-1b-it",
                     device="cuda" if torch.cuda.is_available() else "cpu",
-                    torch_dtype=torch.bfloat16,
-                    model_kwargs={'low_cpu_mem_usage': True}
+                    torch_dtype=torch.bfloat16
                 )
     
     def generate(self, messages, max_tokens):
