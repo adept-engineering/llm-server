@@ -35,7 +35,7 @@ class ModelManager:
             "text-generation",
             model="google/gemma-3-1b-it",
             device="cuda" if torch.cuda.is_available() else "cpu",
-            torch_dtype=torch.bfloat
+            torch_dtype=torch.bfloat16
         )
         self.last_used = time.time()
         self.processing = False
