@@ -8,7 +8,7 @@ import uvicorn
 import os
 import threading
 import time
-
+from utils import _format_messages
 # Set PyTorch memory allocation settings
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:128"
 
@@ -88,9 +88,26 @@ class ModelManager:
             if not self.check_memory(2.0):
                 self.cleanup_if_needed()
                 
-            # Calculate a reasonable amount of tokens based on input
-            input_tokens = len(str(messages)) // 4  # Rough estimate
-            safe_max_tokens = min(max_tokens, 2048, 4096 - input_tokens)
+            # Get tokenizer from the pipeline
+            tokenizer = self.pipe.tokenizer
+            
+            # Convert messages to the format expected by the tokenizer
+            formatted_prompt = _format_messages(messages)
+            
+            # Count tokens in the input
+            input_ids = tokenizer.encode(formatted_prompt)
+            input_token_count = len(input_ids)
+            
+            # Calculate available tokens within model's context window
+            # Most models have a context window between 2048-4096 tokens
+            # For Gemma, let's assume 8192 (but check the specific model's limits)
+            model_max_tokens = 8192  # Adjust based on your specific Gemma model version
+            available_tokens = model_max_tokens - input_token_count
+            
+            # Ensure we don't exceed user request or available context
+            safe_max_tokens = max(1, min(max_tokens, available_tokens, 2048))
+            
+            print(f"Input tokens: {input_token_count}, Available: {available_tokens}, Generating: {safe_max_tokens}")
             
             # Perform generation with memory-efficient settings
             output = self.pipe(
