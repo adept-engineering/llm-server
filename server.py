@@ -1,14 +1,15 @@
 import torch
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Union, Optional
-from transformers import pipeline
+from transformers import pipeline, TextIteratorStreamer
 import gc
 import uvicorn
 import os
 import threading
 import time
-from utils import _format_messages
+from utils import _format_messages, check_for_token_limit, RequestLimiter
 # Set PyTorch memory allocation settings
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:128"
 
@@ -37,8 +38,12 @@ class ModelManager:
             device="cuda" if torch.cuda.is_available() else "cpu",
             torch_dtype=torch.bfloat16
         )
+        self.tokenizer = self.pipe.tokenizer
+        self.model = self.pipe.model
         self.last_used = time.time()
-        self.processing = False
+        self.processing = False #This is for lock
+        self.concurrent_tasks = 0
+
     
     def check_memory(self, required_memory_gb=2.0):
         """Check if there's enough GPU memory available"""
@@ -79,10 +84,67 @@ class ModelManager:
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     torch_dtype=torch.bfloat16
                 )
-    
-    def generate(self, messages, max_tokens):
+    def stream_generate(self, messages, max_tokens, temperature=0.7):
+        """Generate text with streaming support"""
         try:
-            self.processing = True
+            self.concurrent_tasks += 1
+            
+            # Check memory before generation
+            if not self.check_memory(2.0):
+                self.cleanup_if_needed()
+            
+            # Get tokenizer and model from the pipeline
+            tokenizer = self.pipe.tokenizer
+            model = self.pipe.model
+            
+            # Format messages
+            formatted_prompt = _format_messages(messages)
+            
+            # Count tokens in the input
+            input_ids = tokenizer.encode(formatted_prompt)
+            input_context_limit, output_context_limit, input_token_count = check_for_token_limit(input_ids)
+            
+            # Set safe token limit
+            gpu_memory_limit = 2048 if self.check_memory(4.0) else 1024
+            safe_max_tokens = max(1, min(max_tokens, output_context_limit, gpu_memory_limit))
+            
+            print(f"Streaming generation - Input tokens: {input_token_count}, Max new tokens: {safe_max_tokens}")
+            
+            # Create a streamer object
+            streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+            
+            # Prepare inputs
+            inputs = tokenizer(formatted_prompt, return_tensors="pt")
+            if torch.cuda.is_available():
+                inputs = {k: v.to("cuda") for k, v in inputs.items()}
+            
+            # Create a thread for generation
+            generation_kwargs = {
+                "input_ids": inputs["input_ids"],
+                "attention_mask": inputs["attention_mask"],
+                "max_new_tokens": safe_max_tokens,
+                "do_sample": True,
+                "temperature": temperature,
+                "repetition_penalty": 1.1,
+                "streamer": streamer
+            }
+            
+            thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+            thread.start()
+            
+            # Return the streamer iterator
+            return streamer
+            
+        except Exception as e:
+            print(f"Streaming generation error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    def generate(self, messages, max_tokens, use_lock):
+        try:
+            if use_lock == True:
+                self.processing = True
+            else:
+                self.concurrent_tasks += 1
             
             # Check memory before generation
             if not self.check_memory(2.0):
@@ -96,18 +158,9 @@ class ModelManager:
             
             # Count tokens in the input
             input_ids = tokenizer.encode(formatted_prompt)
-            input_token_count = len(input_ids)
+
+            input_context_limit, output_context_limit, input_token_count = check_for_token_limit(input_ids)
             
-            # Gemma-3-1b-it has a 32K token input context and 8192 token output context
-            input_context_limit = 32768  # 32K for 1B model
-            output_context_limit = 8192  # 8K for all Gemma models
-            
-            # Make sure we don't exceed input context
-            if input_token_count > input_context_limit:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Input too long: {input_token_count} tokens exceeds the model's {input_context_limit} token limit"
-                )
             
             # Ensure we don't exceed user request or output context limit
             # Also apply a reasonable default limit to prevent OOM errors
@@ -141,7 +194,11 @@ class ModelManager:
             print(f"Generation error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
         finally:
-            self.processing = False
+            if use_lock == True:
+                self.processing = False
+            else:
+                self.concurrent_tasks -= 1
+
             self.last_used = time.time()
             # Force memory cleanup after generation
             torch.cuda.empty_cache()
@@ -182,6 +239,12 @@ class ChatRequest(BaseModel):
     messages: List[Dict[str, Union[str, List[Dict[str, str]]]]]
     max_tokens: int = Field(default=1024, ge=1, le=2048)
     temperature: Optional[float] = Field(default=0.7, ge=0.1, le=1.0)
+    stream: bool = Field(default=False)
+
+class ServerConfig(BaseModel):
+    max_concurrent_requests: int = Field(default=3, ge=1, le=10, 
+                                         description="Maximum number of concurrent requests")
+
 
 # FastAPI app initialization
 app = FastAPI(
@@ -191,6 +254,9 @@ app = FastAPI(
 
 # Global model manager
 model_manager = ModelManager()
+
+# Initialize with default of 3 concurrent requests
+request_limiter = RequestLimiter(max_concurrent=3)
 
 @app.post("/generate")
 async def generate_text(request: GenerateRequest, background_tasks: BackgroundTasks):
@@ -218,7 +284,7 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
             }
         ]
         
-        generated_text = model_manager.generate(messages, request.max_tokens)
+        generated_text = model_manager.generate(messages, request.max_tokens, True)
         
         return {"generated_text": generated_text}
     finally:
@@ -227,27 +293,69 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
         # Schedule cleanup
         background_tasks.add_task(lambda: torch.cuda.empty_cache())
 
+# Stream generator function
+async def stream_generator(streamer):
+    """Convert TextIteratorStreamer to an async generator for FastAPI streaming"""
+    try:
+        for text in streamer:
+            # Yield chunks in the format expected by the client
+            yield f"{text}"
+            await asyncio.sleep(0)  # Yield control to the event loop
+        
+        # Send end of stream marker
+        yield "data: [DONE]\n\n"
+    finally:
+        # Ensure cleanup happens
+        model_manager.concurrent_tasks -= 1
+        model_manager.last_used = time.time()
+        torch.cuda.empty_cache()
+        gc.collect()
+        request_limiter.release()
+
 @app.post("/chat")
 async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     """
     Chat endpoint supporting multiple message contexts
     """
     # Check if we have enough memory
-    if not model_manager.check_memory(2.0):
-        background_tasks.add_task(model_manager.cleanup_if_needed)
-        raise HTTPException(status_code=503, detail="Server is low on GPU memory. Please try again in a few moments.")
+    # if not model_manager.check_memory(2.0):
+    #     background_tasks.add_task(model_manager.cleanup_if_needed)
+    #     raise HTTPException(status_code=503, detail="Server is low on GPU memory. Please try again in a few moments.")
     
-    # Acquire lock to prevent concurrent use
-    if not model_lock.acquire(blocking=False):
-        raise HTTPException(status_code=429, detail="Server is currently processing another request. Please try again shortly.")
+    # Try to acquire a request slot with timeout
+    if not request_limiter.acquire(blocking=True, timeout=1.0):
+        raise HTTPException(
+            status_code=429, 
+            detail=f"Server is at capacity ({request_limiter.max_concurrent} concurrent requests). Please try again shortly."
+        )
     
     try:
-        generated_text = model_manager.generate(request.messages, request.max_tokens)
-        
-        return {"generated_text": generated_text}
+        if request.stream:
+            # Streaming mode
+            streamer = model_manager.stream_generate(
+                request.messages, 
+                request.max_tokens,
+                request.temperature
+            )
+            
+            # Return a streaming response
+            return StreamingResponse(
+                stream_generator(streamer),
+                media_type="text/event-stream"
+            )
+        else:
+            generated_text = model_manager.generate(request.messages, request.max_tokens, False)
+            
+            return {"generated_text": generated_text}
+    except Exception as e:
+        # Always release the request slot in case of error
+        request_limiter.release()
+        raise e
     finally:
-        # Always release the lock
-        model_lock.release()
+        # For non-streaming responses, release here
+        if not request.stream:
+            request_limiter.release()
+        
         # Schedule cleanup
         background_tasks.add_task(lambda: torch.cuda.empty_cache())
 
@@ -256,6 +364,8 @@ async def get_status():
     """
     Get server status and memory usage
     """
+    limiter_stats = request_limiter.get_stats()
+
     if torch.cuda.is_available():
         torch.cuda.synchronize()
         allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
@@ -271,10 +381,38 @@ async def get_status():
                 "reserved_gb": round(reserved, 2),
                 "free_gb": round(free, 2),
                 "processing": model_manager.processing
-            }
+            },
+            "processing": model_manager.processing,
+            "concurrency": limiter_stats
         }
     else:
-        return {"status": "running", "device": "cpu", "processing": model_manager.processing}
+        return {
+            "status": "running", 
+            "device": "cpu", 
+            "processing": model_manager.processing,
+            "concurrency": limiter_stats
+        }
+
+# New endpoint to configure concurrency
+@app.post("/config")
+async def set_configuration(config: ServerConfig):
+    """
+    Update server configuration including maximum concurrent requests
+    """
+    global request_limiter
+    
+    # Create a new request limiter with the updated max_concurrent value
+    new_limiter = RequestLimiter(max_concurrent=config.max_concurrent_requests)
+    
+    # Wait until all current requests are processed before switching
+    while request_limiter.current_requests > 0:
+        await asyncio.sleep(0.1)
+    
+    # Replace the limiter
+    request_limiter = new_limiter
+    
+    return {"success": True, "message": f"Server now accepts {config.max_concurrent_requests} concurrent requests"}
+
 
 @app.on_event("shutdown")
 def shutdown_event():
