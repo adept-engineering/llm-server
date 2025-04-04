@@ -232,7 +232,7 @@ async def memory_monitor():
 class GenerateRequest(BaseModel):
     system_prompt: str = Field(default="You are a helpful assistant.")
     user_prompt: str
-    max_tokens: int = Field(default=1024, ge=1, le=2048)
+    max_tokens: int = Field(default=1024, ge=1, le=8192)
     temperature: Optional[float] = Field(default=0.7, ge=0.1, le=1.0)
 
 class ChatRequest(BaseModel):
