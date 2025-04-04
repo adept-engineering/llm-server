@@ -164,7 +164,7 @@ class ModelManager:
             
             # Ensure we don't exceed user request or output context limit
             # Also apply a reasonable default limit to prevent OOM errors
-            gpu_memory_limit = 2048 if self.check_memory(4.0) else 1024  # Adaptive based on available memory
+            gpu_memory_limit = 7680 if self.check_memory(4.0) else 3072  # Adaptive based on available memory
             safe_max_tokens = max(1, min(max_tokens, output_context_limit, gpu_memory_limit))
             
             print(f"Input tokens: {input_token_count}, Generating up to: {safe_max_tokens} tokens")
