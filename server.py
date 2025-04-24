@@ -256,7 +256,7 @@ app = FastAPI(
 model_manager = ModelManager()
 
 # Initialize with default of 3 concurrent requests
-request_limiter = RequestLimiter(max_concurrent=3)
+request_limiter = RequestLimiter(max_concurrent=10)
 
 @app.post("/generate")
 async def generate_text(request: GenerateRequest, background_tasks: BackgroundTasks):
