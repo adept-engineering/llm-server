@@ -16,7 +16,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size
 # Lock for thread safety
 model_lock = threading.Lock()
 
-model_id = "google/gemma-3-4b-it"
+model_id = "google/gemma-3-1b-it"
 
 
 # Model and pipeline initialization
@@ -39,7 +39,7 @@ class ModelManager:
             "text-generation",
             model=model_id,
             device="cuda",  # Changed from conditional to always use cuda
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.float32
         )
         self.tokenizer = self.pipe.tokenizer
         self.model = self.pipe.model
@@ -85,7 +85,7 @@ class ModelManager:
                     "text-generation",
                     model=model_id,
                     device="cuda",  # Changed from conditional to always use cuda
-                    torch_dtype=torch.bfloat16
+                    torch_dtype=torch.float32
                 )
     def stream_generate(self, messages, max_tokens, temperature=0.7):
         """Generate text with streaming support"""
