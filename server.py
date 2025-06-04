@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Union, Optional
-from transformers import pipeline, TextIteratorStreamer
+from transformers import pipeline, TextIteratorStreamer, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import gc
 import uvicorn
 import os
@@ -16,7 +16,23 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size
 # Lock for thread safety
 model_lock = threading.Lock()
 
-model_name = "google/gemma-3-4b-it-qat-q4_0-gguf"
+model_id = "google/gemma-3-4b-it"
+
+# Configure 8-bit quantization settings
+quantization_config = BitsAndBytesConfig(
+    load_in_8bit=True,  # Changed from 4-bit to 8-bit
+    bnb_8bit_compute_dtype=torch.bfloat16  # Use bfloat16 for computation
+)
+
+# Load the tokenizer
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+# Load the model with 4-bit quantization
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    device_map="auto",  # Automatically map model to available devices
+    quantization_config=quantization_config
+)
 
 # Model and pipeline initialization
 class ModelManager:
@@ -35,15 +51,16 @@ class ModelManager:
         
         # Initialize the pipeline with memory-efficient settings
         self.pipe = pipeline(
-            "image-text-to-text",
-            model=model_name,
+            "text-generation",
+            model=model_id,
             device="cuda" if torch.cuda.is_available() else "cpu",
-            torch_dtype=torch.bfloat16
+            torch_dtype=torch.bfloat16,
+            quantization_config=quantization_config
         )
         self.tokenizer = self.pipe.tokenizer
         self.model = self.pipe.model
         self.last_used = time.time()
-        self.processing = False #This is for lock
+        self.processing = False
         self.concurrent_tasks = 0
 
     
@@ -82,9 +99,10 @@ class ModelManager:
                 # Reinitialize
                 self.pipe = pipeline(
                     "text-generation",
-                    model=model_name,
+                    model=model_id,
                     device="cuda" if torch.cuda.is_available() else "cpu",
-                    torch_dtype=torch.bfloat16
+                    torch_dtype=torch.bfloat16,
+                    quantization_config=quantization_config
                 )
     def stream_generate(self, messages, max_tokens, temperature=0.7):
         """Generate text with streaming support"""
