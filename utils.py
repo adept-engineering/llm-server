@@ -71,3 +71,33 @@ class RequestLimiter:
                 "current_requests": self.current_requests,
                 "available_slots": self.max_concurrent - self.current_requests
             }
+
+# Utility functions for vLLM-specific operations
+def estimate_tokens(text: str) -> int:
+    """
+    Rough estimation of token count for planning purposes
+    """
+    # Rough approximation: ~4 characters per token
+    return len(text) // 4
+
+def validate_sampling_params(temperature: float, max_tokens: int) -> Tuple[float, int]:
+    """
+    Validate and adjust sampling parameters
+    """
+    # Clamp temperature
+    temperature = max(0.1, min(1.0, temperature))
+    
+    # Ensure reasonable max_tokens
+    max_tokens = max(1, min(8192, max_tokens))
+    
+    return temperature, max_tokens
+
+def format_error_response(error: Exception) -> Dict:
+    """
+    Format error responses consistently
+    """
+    return {
+        "error": True,
+        "message": str(error),
+        "type": type(error).__name__
+    }

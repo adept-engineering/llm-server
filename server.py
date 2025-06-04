@@ -33,8 +33,8 @@ class ModelManager:
         
         # Initialize the pipeline with memory-efficient settings
         self.pipe = pipeline(
-            "text-generation",
-            model="google/gemma-3-1b-it",
+            "image-text-to-text",
+            model="google/gemma-3-4b-it",
             device="cuda" if torch.cuda.is_available() else "cpu",
             torch_dtype=torch.bfloat16
         )
