@@ -16,6 +16,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size
 # Lock for thread safety
 model_lock = threading.Lock()
 
+model_name = "google/gemma-3-4b-it-qat-q4_0-gguf"
+
 # Model and pipeline initialization
 class ModelManager:
     _instance = None
@@ -34,7 +36,7 @@ class ModelManager:
         # Initialize the pipeline with memory-efficient settings
         self.pipe = pipeline(
             "image-text-to-text",
-            model="google/gemma-3-4b-it",
+            model=model_name,
             device="cuda" if torch.cuda.is_available() else "cpu",
             torch_dtype=torch.bfloat16
         )
@@ -80,7 +82,7 @@ class ModelManager:
                 # Reinitialize
                 self.pipe = pipeline(
                     "text-generation",
-                    model="google/gemma-3-1b-it",
+                    model=model_name,
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     torch_dtype=torch.bfloat16
                 )
