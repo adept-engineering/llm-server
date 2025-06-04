@@ -18,21 +18,6 @@ model_lock = threading.Lock()
 
 model_id = "google/gemma-3-4b-it"
 
-# Configure 8-bit quantization settings
-quantization_config = BitsAndBytesConfig(
-    load_in_8bit=True,  # Changed from 4-bit to 8-bit
-    bnb_8bit_compute_dtype=torch.bfloat16  # Use bfloat16 for computation
-)
-
-# Load the tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-# Load the model with 8-bit quantization
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    device_map="cuda",  # Changed from "auto" to "cuda"
-    quantization_config=quantization_config
-)
 
 # Model and pipeline initialization
 class ModelManager:
@@ -55,7 +40,6 @@ class ModelManager:
             model=model_id,
             device="cuda",  # Changed from conditional to always use cuda
             torch_dtype=torch.bfloat16,
-            quantization_config=quantization_config
         )
         self.tokenizer = self.pipe.tokenizer
         self.model = self.pipe.model
@@ -101,8 +85,7 @@ class ModelManager:
                     "text-generation",
                     model=model_id,
                     device="cuda",  # Changed from conditional to always use cuda
-                    torch_dtype=torch.bfloat16,
-                    quantization_config=quantization_config
+                    torch_dtype=torch.bfloat16
                 )
     def stream_generate(self, messages, max_tokens, temperature=0.7):
         """Generate text with streaming support"""
