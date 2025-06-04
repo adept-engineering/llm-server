@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple, Dict, Optional, Union
 import threading
 
 def _format_messages(messages):
