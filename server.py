@@ -302,7 +302,7 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
         logging.info(result)
         generated_text = result.get("response", "")
         
-        return {"generated_text": generated_text}
+        return {"generated_text": generated_text, "result": result }
     finally:
         # Always release the lock
         model_lock.release()
