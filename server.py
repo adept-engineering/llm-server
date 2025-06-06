@@ -299,10 +299,10 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
         #generated_text = model_manager.generate(messages, request.max_tokens, True)
         response = model_inference(messages = messages, max_tokens=request.max_tokens, stream = False)
         result = response.json()
-        logging.info(result)
-        generated_text = result.get("response", "")
+
+        generated_text = result.get("message").get("content")
         
-        return {"generated_text": generated_text, "result": result }
+        return {"generated_text": generated_text }
     finally:
         # Always release the lock
         model_lock.release()
