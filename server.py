@@ -11,6 +11,7 @@ import threading
 import time
 from utils import _format_messages, check_for_token_limit, RequestLimiter
 from model import model_inference
+import logging
 # Set PyTorch memory allocation settings
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:128"
 
@@ -298,6 +299,7 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
         #generated_text = model_manager.generate(messages, request.max_tokens, True)
         response = model_inference(messages = messages, max_tokens=request.max_tokens, stream = False)
         result = response.json()
+        logging.info(result)
         generated_text = result.get("response", "")
         
         return {"generated_text": generated_text}
