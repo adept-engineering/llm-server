@@ -10,6 +10,7 @@ import os
 import threading
 import time
 from utils import _format_messages, check_for_token_limit, RequestLimiter
+from model import model_inference
 # Set PyTorch memory allocation settings
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:128"
 
@@ -17,6 +18,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size
 model_lock = threading.Lock()
 
 model_id = "google/gemma-3-1b-it"
+
 
 
 # Model and pipeline initialization
@@ -35,14 +37,16 @@ class ModelManager:
             torch.cuda.empty_cache()
         
         # Initialize the pipeline with memory-efficient settings
+        '''
         self.pipe = pipeline(
             "text-generation",
             model=model_id,
             device="cuda",  # Changed from conditional to always use cuda
             torch_dtype=torch.float32
         )
-        self.tokenizer = self.pipe.tokenizer
-        self.model = self.pipe.model
+        '''
+        #self.tokenizer = self.pipe.tokenizer
+        #self.model = self.pipe.model
         self.last_used = time.time()
         self.processing = False
         self.concurrent_tasks = 0
@@ -76,17 +80,20 @@ class ModelManager:
             # If still not enough memory, reload the model
             if not self.check_memory(required_memory_gb=5.0):
                 print("Reinitializing model to clear memory...")
-                del self.pipe
+                #del self.pipe
                 torch.cuda.empty_cache()
                 gc.collect()
                 
                 # Reinitialize
+                '''
                 self.pipe = pipeline(
                     "text-generation",
                     model=model_id,
                     device="cuda",  # Changed from conditional to always use cuda
                     torch_dtype=torch.float32
                 )
+              '''
+    '''
     def stream_generate(self, messages, max_tokens, temperature=0.7):
         """Generate text with streaming support"""
         try:
@@ -97,8 +104,8 @@ class ModelManager:
                 self.cleanup_if_needed()
             
             # Get tokenizer and model from the pipeline
-            tokenizer = self.pipe.tokenizer
-            model = self.pipe.model
+            #tokenizer = self.pipe.tokenizer
+            #model = self.pipe.model
             
             # Format messages
             formatted_prompt = _format_messages(messages)
@@ -207,6 +214,7 @@ class ModelManager:
             torch.cuda.empty_cache()
             gc.collect()
     
+    '''
     def full_cleanup(self):
         """Complete cleanup of model resources"""
         if hasattr(self, 'pipe'):
@@ -279,15 +287,18 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
         messages = [
             {
                 "role": "system",
-                "content": [{"type": "text", "text": request.system_prompt}]
+                "content": request.system_prompt
             },
             {
                 "role": "user",
-                "content": [{"type": "text", "text": request.user_prompt}]
+                "content": request.user_prompt
             }
         ]
         
-        generated_text = model_manager.generate(messages, request.max_tokens, True)
+        #generated_text = model_manager.generate(messages, request.max_tokens, True)
+        response = model_inference(messages = messages, max_tokens=request.max_tokens, stream = False)
+        result = response.json()
+        generated_text = result.get("response", "")
         
         return {"generated_text": generated_text}
     finally:
@@ -335,19 +346,35 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     try:
         if request.stream:
             # Streaming mode
+            '''
             streamer = model_manager.stream_generate(
                 request.messages, 
                 request.max_tokens,
                 request.temperature
             )
+            '''
+
+            response = model_inference(messages=request.messages, max_tokens=request.max_tokens, stream=True)
             
+            def event_stream():
+                for chunk in resp.iter_lines():
+                    if chunk:
+                        yield chunk.get("message").get("content")
+
+            return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
             # Return a streaming response
+            '''
             return StreamingResponse(
                 stream_generator(streamer),
                 media_type="text/event-stream"
             )
+            '''
         else:
-            generated_text = model_manager.generate(request.messages, request.max_tokens, False)
+            response = model_inference(messages = messages, max_tokens=request.max_tokens, stream = False)
+            result = response.json()
+            generated_text = result.get("message").get("content") if result else ""
             
             return {"generated_text": generated_text}
     except Exception as e:
