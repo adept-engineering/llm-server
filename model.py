@@ -2,7 +2,8 @@ import requests
 import sys
 from typing import List, Any
 
-model_name = "gemma3:4b-it-qat"
+#model_name = "gemma3:4b-it-qat"
+model_name = "llama3.2:latest"
 
 def model_inference(messages: List[Any], max_tokens: int, stream=True):
     resp = requests.post(
