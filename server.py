@@ -241,11 +241,14 @@ async def memory_monitor():
         await asyncio.sleep(60)
 
 # Pydantic models for request validation
+
+DEFAULT_MODEL = "gemma3:4b-it-qat"
 class GenerateRequest(BaseModel):
     system_prompt: str = Field(default="You are a helpful assistant.")
     user_prompt: str
     max_tokens: int = Field(default=1024, ge=1, le=8192)
-    temperature: Optional[float] = Field(default=0.7, ge=0.1, le=1.0)
+    temperature: Optional[float] = Field(default=0.7, ge=0.1, le=1.0),
+    model: str = Field(default=DEFAULT_MODEL)
 
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Union[str, List[Dict[str, str]]]]]
@@ -356,7 +359,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
             )
             '''
 
-            response = model_inference(messages=request.messages, max_tokens=request.max_tokens, stream=True)
+            response = model_inference(messages=request.messages, max_tokens=request.max_tokens, stream=True, model=DEFAULT_MODEL)
             
             def event_stream():
                 for chunk in resp.iter_lines():
