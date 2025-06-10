@@ -2,7 +2,7 @@ import torch
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Union, Optional, Any
 from transformers import pipeline, TextIteratorStreamer, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import gc
 import uvicorn
@@ -242,16 +242,17 @@ async def memory_monitor():
 
 # Pydantic models for request validation
 
-DEFAULT_MODEL = "gemma3:4b-it-qat"
+DEFAULT_MODEL = "llama3.2:latest"
 class GenerateRequest(BaseModel):
     system_prompt: str = Field(default="You are a helpful assistant.")
     user_prompt: str
     max_tokens: int = Field(default=1024, ge=1, le=8192)
     temperature: Optional[float] = Field(default=0.7, ge=0.1, le=1.0),
     model: str = Field(default=DEFAULT_MODEL)
+    schema: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class ChatRequest(BaseModel):
-    messages: List[Dict[str, Union[str, List[Dict[str, str]]]]]
+    messages: List[Dict[str, Any]]
     max_tokens: int = Field(default=1024, ge=1, le=2048)
     temperature: Optional[float] = Field(default=0.7, ge=0.1, le=1.0)
     stream: bool = Field(default=False)
@@ -300,7 +301,12 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
         ]
         
         #generated_text = model_manager.generate(messages, request.max_tokens, True)
-        response = model_inference(messages = messages, max_tokens=request.max_tokens, stream = False)
+        response = model_inference(
+            messages = messages, 
+            max_tokens = request.max_tokens, 
+            stream = False, 
+            schema = request.schema
+        )
         result = response.json()
 
         generated_text = result.get("message").get("content")
