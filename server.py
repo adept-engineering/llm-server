@@ -305,7 +305,8 @@ async def generate_text(request: GenerateRequest, background_tasks: BackgroundTa
             messages = messages, 
             max_tokens = request.max_tokens, 
             stream = False, 
-            schema = request.schema
+            schema = request.schema,
+            model = request.model
         )
         result = response.json()
 
