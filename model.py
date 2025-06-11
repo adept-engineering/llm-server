@@ -16,7 +16,7 @@ def model_inference(messages: List[Any], max_tokens: int, stream=True, model: st
             "messages": messages, 
             "stream": stream,
             "num_predict": max_tokens,
-            "format": schema
+            #"format": schema
         },
         stream=stream,
     )
