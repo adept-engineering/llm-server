@@ -1,0 +1,24 @@
+name: Dropper Guard
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check-long-lines:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail on any tracked line over 20,000 characters
+        run: |
+          set -euo pipefail
+          hits=$(git ls-files -z | xargs -0 awk 'length > 20000 { print FILENAME": line "FNR" is "length" chars"; exit 1 }' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Found a line over 20,000 characters (possible obfuscated supply-chain payload):"
+            echo "$hits"
+            exit 1
+          fi
+          echo "No oversized lines found."
